@@ -1,0 +1,2 @@
+In cal_rdf.cpp we have pre-assumed fixed ltc
+For more general cases use v2_rdf.cpp
