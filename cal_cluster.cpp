@@ -25,6 +25,7 @@
 #include <fstream>
 #include <cstring>
 #include <vector>
+#include <sstream>
 
 using namespace std;
 
@@ -58,9 +59,9 @@ const int v1nbr[8][3]= {{ 1,  0,  0}, { 0,  1,  0}, { 0,  0,  1},
 			{-1,  0,  0}, { 0, -1,  0}, { 0,  0, -1},
 			{ 1,  1,  1}, {-1, -1, -1}	       };
 
-const int nx=  63;
-const int ny=  63;
-const int nz=  63;
+const int nx=  64;
+const int ny=  64;
+const int nz=  64;
 
 const int Ttype= -1;
 
@@ -77,14 +78,14 @@ const int cycle_lce=		1e6; // MC steps that the period of the lce calculations (
 const int itype_sro= -1;
 const int jtype_sro= 1;
 
-const char name_in_t0[50]=  "./t0.ltcp";
-const char name_in_his[50]= "./history.info";
 // parameters //
 
 // global variables
 double realtime= 0; // real time in the simulation (unit: s) 
 int timestep= 0;
 int states[nx][ny][nz];
+int* const sptr= &states[0][0][0]; 
+vector < vector<int> > vltcp;
 int ntt= 0; 
 int cid= 0;
 int id_cltr[nx*ny*nz]= {0}; // indicate the cluster id that a Ttype ltc(index) is labeled with (0 means not Ttype)
@@ -99,12 +100,17 @@ FILE * out_msd;   // in cal_msd
 FILE * out_lce;   // in cal_lce
 FILE * out_sro;   // in cal_sro
 FILE * out_lro;   // in cal_lro
+
+char name_in_ltcp[50];
+char name_in_vcc[50];
+char name_in_sol[50];
 // global variables
 
 //######################### functions #########################//
 // Read files
-void read_t0();
-void read_his_cal();
+void read_ltcp();
+void read_his_vcc();
+void read_his_cal(); // read his_sol and calculate
 // Calculations
 void update_vpos(int iltcp);
 void update_cid(int x, int y, int z); // input one ltc point and renew cluster id around it
@@ -116,9 +122,20 @@ void cal_sro();
 void cal_lro();
 //######################### functions #########################//
 
-int main(){
+int main(int nArg, char *Arg[]){
 	int t0cpu= time(0);
 
+	// INPUT FILE NAMES
+	if(nArg != 4){
+		cout << "Calculate all CLUSTERING properties" << endl;
+		cout << "Error: Parameter required: <name_in_ltcp> <name_in_history_vcc> <name_in_history_slo>" << endl;
+		exit(1);
+	}
+	strcpy(name_in_ltcp, Arg[1]);
+	strcpy(name_in_vcc,  Arg[2]);
+	strcpy(name_in_sol,  Arg[3]);
+	// INPUT FILE NAMES
+	
 	cout << "Calculation is starting..." << endl;
 	cout << "The TARGETED type is " << Ttype << endl;
 	cout << "The system size is " << nx << " x " << ny << " x " << nz << endl;
@@ -150,7 +167,8 @@ int main(){
 	// OPEN OUTPUT FILES  
 
 	// CALCULATIONS
-	read_t0();
+	read_ltcp();
+	read_his_vcc();
 	read_his_cal();
 	// CALCULATIONS
 
@@ -158,27 +176,25 @@ int main(){
 	cout << "\nCalculation is completed!! Total CPU time: " << tfcpu - t0cpu << " secs" << endl;
 }
 
-void read_t0(){ // Reading t0.ltcp ////////////////////
-	ifstream in_t0(name_in_t0, ios::in);
-	if(! in_t0.is_open()) error(1, "in_t0 was not open"); // check
+void read_ltcp(){ // Reading t0.ltcp ////////////////////
+	ifstream in_ltcp(name_in_ltcp);
+	if(! in_ltcp.is_open()) error(1, "in_ltcp was not open"); // check
 
-	int ntotal; in_t0 >> ntotal; 
+	int ntotal; in_ltcp >> ntotal; in_ltcp.ignore(); 
 	if(ntotal != nx*ny*nz) error(1, "ntotal != nx*ny*nz", 2, ntotal, nx*ny*nz); // check
 	
-	char line2[8]; in_t0 >> line2;
-	if(strcmp(line2, "t0.ltcp") !=0) error(1, "the second line of t0.ltcp != t0.ltcp"); // check
+	string line2; getline(in_ltcp, line2);
 
 	for(int a=0; a<ntotal; a ++){
 		int state_in, i, j, k;
-		if(in_t0.eof()) error(1, "reach end of file before finish reading all data");
-		in_t0 >> state_in >> i >> j >> k;
+		in_ltcp >> state_in >> i >> j >> k;
+		if(in_ltcp.eof()) error(1, "reach end of file before finish reading all data");
 		if(state_in > MAX_TYPE) error(1, "(in_t0) state input is larger than MAX_TYPE", 1, state_in); // check
 		states[i][j][k]= state_in;
 
 		if(state_in==Ttype) ntt ++;
 	}
-	cout << "ntt= " << ntt << endl;
-	in_t0.close();
+	in_ltcp.close();
 	cout << "t0.ltcp file reading completed; ntt= " << ntt << endl;
 
 	// identify clusters and give them ids at t0
@@ -202,40 +218,84 @@ void read_t0(){ // Reading t0.ltcp ////////////////////
 	sum_csize();
 }
 
-void read_his_cal(){ // Reading history.info and calculating /////////
-	ifstream in_hi(name_in_his, ios::in);
-	if(! in_hi.is_open()) error(1, "in_t0 was not open");
-	cout << "history.info is now reading to calculate csize..." << endl;
+void read_his_vcc(){ // Reading history.vcc
+	ifstream in_vcc(name_in_vcc);
+	if(! in_vcc.is_open()) error(1, "in_vcc was not open");
+	cout << name_in_vcc << " is now reading and storing..." << endl;
 
-	vector <int> i_will; //the indexs list which will update cid later
-	while(! in_hi.eof()){
-		for(int a=1; a<=2; a++){
-			int state_in, i_ltcp;
-			in_hi >> state_in >> i_ltcp;
-			if(0==state_in) update_vpos(i_ltcp);
-
-			int i= (int) (i_ltcp/nz)/ny;
-			int j= (int) (i_ltcp/nz)%ny;
-			int k= (int)  i_ltcp%nz;
-			states[i][j][k]= state_in;
-			
-			i_will.push_back(i_ltcp);
-		}
+	int nv;
+	int id_vblock= -1; // id of blocks of snapshots of vacancy history file
+	while(in_vcc >> nv){
+		in_vcc.ignore();
 		
-		char c_dt[4];
-		double dt= -1;
-		in_hi >> c_dt >> dt;
-		if(dt==-1) break;
-		if(0 != strcmp(c_dt, "dt:"))  error(1, "(reading history) the format is incorrect");
-	
-		timestep ++;
-		realtime += dt;
+		string aline;
+		stringstream lstream;
 
+		id_vblock ++;
+		vltcp.push_back(vector<int>());
+
+		getline(in_vcc, aline); // second line
+
+		for(int a=0; a<nv; a ++){
+			int vltcp_in;
+			
+			getline(in_vcc, aline);
+			lstream << aline; lstream >> vltcp_in; 
+			lstream.str(""); lstream.clear();
+
+			vltcp[id_vblock].push_back(vltcp_in);
+		}
+	}
+
+	cout << name_in_vcc << " reading completed; n_vblocks= " << id_vblock+1 << ", nV= " << nv << endl;
+}
+
+void read_his_cal(){ // Reading history.sol and calculating /////////
+	ifstream in_sol(name_in_sol);
+	if(! in_sol.is_open()) error(1, "in_sol was not open");
+	cout << name_in_sol << " is now reading to calculate csize..." << endl;
+
+	int id_sblock= -1; // number of blocks of snapshots of solute history file
+	int ns;
+	while(in_sol >> ns){
+		in_sol.ignore();
+		id_sblock ++;
+
+		vector <int> i_will; //the indexs list which will update cid later
+		if(i_will.size() != 0) error(1, "vector didnt destructed"); // DELETE IT
+
+		// READING and UPDATE STATES ARRAY
+		char c_T[3];
+		in_sol >> c_T >> timestep >> realtime;
+		if(strcmp("T:", c_T) !=0) error(1, "(reading history) the format is incorrect"); // check
+
+		if(id_sblock==0) states[v0[0]][v0[1]][v0[2]]= 1;
+		else		 *(sptr+vltcp[id_sblock-1].at(0))= 1;
+		vector <int> s1_store;
+		for(int a=0; a< ns; a ++){
+			int s0, s1;
+			in_sol >> s0 >> s1;
+			if(*(sptr+s0) != -1) error(1, "(his_sol) the <from> state of a ltcp is not solute", 2, s0, *(sptr+s0)); // check
+
+			*(sptr+s0)= 1;
+			s1_store.push_back(s1); // if update states array now it might be covered by a later "s0" to become 1 instead of -1
+			i_will.push_back(s0); 
+			i_will.push_back(s1);
+		}
+		if(s1_store.size() != ns) error(1, "(s1_store) s1_store didn't store s1 well"); // check, DELETE IT
+		for(int a=0; a<ns; a ++)			*(sptr+s1_store[a])= -1;
+		
+		for(int a=0; a<vltcp[id_sblock].size(); a ++)	*(sptr+vltcp[id_sblock].at(a))= 0;
+		// READING and UPDATE STATES ARRAY
+
+		// UPDATE CLUSTER ID
 		for(int a=0; a<i_will.size(); a++){
 			int x1= (int) (i_will.at(a)/nz)/ny;
 			int y1= (int) (i_will.at(a)/nz)%ny;
 			int z1= (int)  i_will.at(a)%nz;
 
+			update_cid(x1, y1, z1);
+			
 			for(int b=0; b<n1nbr; b ++){
 				int x2= pbc(x1+v1nbr[b][0], nx);
 				int y2= pbc(y1+v1nbr[b][1], ny);
@@ -245,35 +305,18 @@ void read_his_cal(){ // Reading history.info and calculating /////////
 				update_cid(x2, y2, z2);
 			}
 		}
+		// UPDATE CLUSTER ID
 
-		// properties calculations
+		// PROPERTIES CALCULATIONS
 		if(0==timestep%sample_cltr) sum_csize();
 		if(0==timestep%sample_msd)  cal_msd();
 		if(0==timestep%sample_sro)  cal_sro();
 		if(0==timestep%sample_lro)  cal_lro();
 		if(0==timestep%sample_lce)  cal_lce();
-		// properties calculations
-		
-		i_will.clear();
+		// PROPERTIES CALCULATIONS
 		
 		if(0==timestep%100000) cout << "T: " << timestep << " " << realtime << endl;
 	}
-}
-
-void update_vpos(int iltcp){
-	if(0==states[iltcp]) error(1, "(update_vpos) the ltcp where the vacancy jumps into is with a state 0");
-
-	int x= (int) (iltcp/nz)/ny;
-	int y= (int) (iltcp/nz)%ny;
-	int z= (int)  iltcp%nz;
-	
-	if((x-vpos[0])==(nx-1)) vi[0] --; else if((x-vpos[0])==(-nx+1)) vi[0] ++; else if(abs(x-vpos[0])>1) error(1, "(update_vpos) the vacancy moves larger than 1");
-	if((y-vpos[1])==(ny-1)) vi[1] --; else if((y-vpos[1])==(-ny+1)) vi[1] ++; else if(abs(y-vpos[1])>1) error(1, "(update_vpos) the vacancy moves larger than 1");
-	if((z-vpos[2])==(nz-1)) vi[2] --; else if((z-vpos[2])==(-nz+1)) vi[2] ++; else if(abs(z-vpos[2])>1) error(1, "(update_vpos) the vacancy moves larger than 1");
-	
-	vpos[0]= x;
-	vpos[1]= y;
-	vpos[2]= z;
 }
 
 void update_cid(int x, int y, int z){ 
