@@ -51,7 +51,7 @@ int pbc(int x_, int nx_){ // Periodic Boundary Condition
 }
 
 // parameters //
-#define MAX_TYPE 10
+#define MAX_TYPE 2
 #define DEF_CLTR 9 // The definition of minimum number of ltcps for a cluster
 const double vbra[3][3]= {{-0.5,  0.5,  0.5}, { 0.5, -0.5,  0.5}, { 0.5,  0.5, -0.5}};
 const int n1nbr= 8;
@@ -63,35 +63,35 @@ const int nx=  64;
 const int ny=  64;
 const int nz=  64;
 
-const int Ttype= -1;
-
 const int sample_cltr=		1e5; 
 const int cycle_out_csind=	1e7;
 
-const int sample_msd=		1e3;
 const int sample_sro=		1e3;
 const int sample_lro=		1e3;
+const int sample_msd=		1e3;
 
 const int sample_lce=		1e3;
 const int cycle_lce=		1e6; // MC steps that the period of the lce calculations (output an point of lce)
 
+const int Ttype= -1; // targeted type: solute atom
 const int itype_sro= -1;
 const int jtype_sro= 1;
-
 // parameters //
 
 // global variables
 double realtime= 0; // real time in the simulation (unit: s) 
 int timestep= 0;
+
 int states[nx][ny][nz];
-int* const sptr= &states[0][0][0]; 
-vector < vector<int> > vltcp;
-int ntt= 0; 
+int* const sptr= &states[0][0][0]; // pointer to states array 
+
+int v0[3]; // vposition at T=0 *ONE V
+vector < vector<int> > vltcp; // vacancy position vector 
+vector < vector<int> > iv; // vacancy image box id  *ONE V 
+
+int ntt= 0; // number of targeted type 
 int cid= 0;
 int id_cltr[nx*ny*nz]= {0}; // indicate the cluster id that a Ttype ltc(index) is labeled with (0 means not Ttype)
-int v0[3];
-int vpos[3];
-int vi[3]= {0}; // image box of the vacancy
 
 FILE * out_csize; // in sum_csize
 FILE * out_csave; // in sum_csize
@@ -112,11 +112,10 @@ void read_ltcp();
 void read_his_vcc();
 void read_his_cal(); // read his_sol and calculate
 // Calculations
-void update_vpos(int iltcp);
 void update_cid(int x, int y, int z); // input one ltc point and renew cluster id around it
 void sum_csize();
 void write_csind(int cid, int *N_in_cltr);
-void cal_msd();
+void cal_msd(int bid);
 void cal_lce();
 void cal_sro();
 void cal_lro();
@@ -200,21 +199,24 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 	// identify clusters and give them ids at t0
 	int vcheck= 0;
 	for(int a=0; a<ntotal; a ++){
-		int x= (int) ((a)/nz)/ny;
-		int y= (int) ((a)/nz)%ny;
-		int z= (int)  (a)%nz;
+		int x= (int) (a/nz)/ny;
+		int y= (int) (a/nz)%ny;
+		int z= (int)  a%nz;
 
-		if(0==states[x][y][z]){
+		if(0==*(sptr+a)){
 			vcheck ++;
-			v0[0]= x; vpos[0]= x;
-			v0[1]= y; vpos[1]= y;
-			v0[2]= z; vpos[2]= z;
+
+			vltcp.push_back(vector<int>());
+			vltcp[0].push_back(a);
+			
+			v0[0]= x; v0[1]= y; v0[2]= z; // *ONE V
 		}
 
 		update_cid(x, y, z);
 	}
 	if(vcheck !=1) error(1, "(read_t0) vacancy larger than 1, need recoding");
-	
+	iv.push_back(vector<int>()); // iv at T=0 *ONE V
+
 	sum_csize();
 }
 
@@ -224,26 +226,24 @@ void read_his_vcc(){ // Reading history.vcc
 	cout << name_in_vcc << " is now reading and storing..." << endl;
 
 	int nv;
-	int id_vblock= -1; // id of blocks of snapshots of vacancy history file
+	int id_vblock= 0; // id of blocks of snapshots of vacancy history file
 	while(in_vcc >> nv){
 		in_vcc.ignore();
 		
-		string aline;
-		stringstream lstream;
-
 		id_vblock ++;
 		vltcp.push_back(vector<int>());
-
-		getline(in_vcc, aline); // second line
-
+		   iv.push_back(vector<int>()); // *ONE V
+		
+		string line2; getline(in_vcc, line2); // second line
+		
 		for(int a=0; a<nv; a ++){
-			int vltcp_in;
-			
-			getline(in_vcc, aline);
-			lstream << aline; lstream >> vltcp_in; 
-			lstream.str(""); lstream.clear();
+			int vltcp_in, ix, iy, iz;
+			in_vcc >> vltcp_in >> ix >> iy >> iz; 
 
 			vltcp[id_vblock].push_back(vltcp_in);
+			   iv[id_vblock].push_back(ix); // *ONE V
+			   iv[id_vblock].push_back(iy); 
+			   iv[id_vblock].push_back(iz);
 		}
 	}
 
@@ -255,36 +255,35 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 	if(! in_sol.is_open()) error(1, "in_sol was not open");
 	cout << name_in_sol << " is now reading to calculate csize..." << endl;
 
-	int id_sblock= -1; // number of blocks of snapshots of solute history file
 	int ns;
+	int id_sblock= 0; // number of blocks of snapshots of solute history file
 	while(in_sol >> ns){
 		in_sol.ignore();
+		
 		id_sblock ++;
+		for(int a=0; a<vltcp[id_sblock-1].size(); a ++) 
+			*(sptr+vltcp[id_sblock-1].at(a))= 1; // chg prev vcc posi to 1 and then chg cur vcc posi to 0 later
 
-		vector <int> i_will; //the indexs list which will update cid later
-		if(i_will.size() != 0) error(1, "vector didnt destructed"); // DELETE IT
+		vector <int> i_will; // the indexs list which will update cid later
 
 		// READING and UPDATE STATES ARRAY
 		char c_T[3];
 		in_sol >> c_T >> timestep >> realtime;
 		if(strcmp("T:", c_T) !=0) error(1, "(reading history) the format is incorrect"); // check
-
-		if(id_sblock==0) states[v0[0]][v0[1]][v0[2]]= 1;
-		else		 *(sptr+vltcp[id_sblock-1].at(0))= 1;
+		
 		vector <int> s1_store;
 		for(int a=0; a< ns; a ++){
-			int s0, s1;
+			int s0, s1; // from and to ltcp of solute atoms
 			in_sol >> s0 >> s1;
 			if(*(sptr+s0) != -1) error(1, "(his_sol) the <from> state of a ltcp is not solute", 2, s0, *(sptr+s0)); // check
 
 			*(sptr+s0)= 1;
-			s1_store.push_back(s1); // if update states array now it might be covered by a later "s0" to become 1 instead of -1
-			i_will.push_back(s0); 
+			s1_store.push_back(s1); // update <to> states later or a second <to> ltcp to a prev <from> ltcp may get wrong
+			i_will.push_back(s0);
 			i_will.push_back(s1);
 		}
-		if(s1_store.size() != ns) error(1, "(s1_store) s1_store didn't store s1 well"); // check, DELETE IT
-		for(int a=0; a<ns; a ++)			*(sptr+s1_store[a])= -1;
 		
+		for(int a=0; a<ns; a ++)			*(sptr+s1_store[a])= -1;
 		for(int a=0; a<vltcp[id_sblock].size(); a ++)	*(sptr+vltcp[id_sblock].at(a))= 0;
 		// READING and UPDATE STATES ARRAY
 
@@ -309,7 +308,7 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 
 		// PROPERTIES CALCULATIONS
 		if(0==timestep%sample_cltr) sum_csize();
-		if(0==timestep%sample_msd)  cal_msd();
+		if(0==timestep%sample_msd)  cal_msd(id_sblock);
 		if(0==timestep%sample_sro)  cal_sro();
 		if(0==timestep%sample_lro)  cal_lro();
 		if(0==timestep%sample_lce)  cal_lce();
@@ -435,10 +434,10 @@ endloop:;
 	}
 }
 
-void cal_msd(){
-	int v1= vpos[0] + vi[0]*nx;
-	int v2= vpos[1] + vi[1]*ny;
-	int v3= vpos[2] + vi[2]*nz;
+void cal_msd(int bid){
+	int v1= (vltcp[bid][0]/nz)/ny + iv[bid][0]*nx; // *ONE V 
+	int v2= (vltcp[bid][0]/nz)%ny + iv[bid][1]*ny;
+	int v3=  vltcp[bid][0]%nz     + iv[bid][2]*nz;
 
 	double dx= (v1-v0[0])*vbra[0][0] + (v2-v0[1])*vbra[1][0] + (v3-v0[2])*vbra[2][0];
 	double dy= (v1-v0[0])*vbra[0][1] + (v2-v0[1])*vbra[1][1] + (v3-v0[2])*vbra[2][1];
