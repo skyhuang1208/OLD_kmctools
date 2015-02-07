@@ -191,11 +191,10 @@ void read_t0(){ // Reading t0.ltcp
 	ifstream in_t0(name_in_t0, ios::in);
 	if(! in_t0.is_open()) error(1, "in_t0 was not open"); // check
 
-	int ntotal; in_t0 >> ntotal; 
+	int ntotal; in_t0 >> ntotal; in_t0.ignore();
 	if(ntotal != nx*ny*nz) error(1, "ntotal != nx*ny*nz", 2, ntotal, nx*ny*nz); // check
 	
-	char line2[8]; in_t0 >> line2;
-	if(strcmp("t0.ltcp", line2) !=0) error(1, "the second line != t0"); // check
+	string line2; getline(in_t0, line2);
 
 	for(int a=0; a<ntotal; a ++){
 		if(in_t0.eof()) error(1, "reach end of file before finish reading all data");

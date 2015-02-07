@@ -22,19 +22,39 @@ else			{ open(IN, $history_file)   || die ("Cannot open t0.xyz file for reading\
 if (-e $output_file)	{ die("ABORT::output file <$output_file> exists! <protection mode>\n");}
 else			{ open(OUT, ">$output_file") || die ("Cannot open file for writing\n");}
 
-my $line= -1;
-my $timestep= 1;
-
+my @data;
+my $line_in_block= 0;
+my $nlines;
+my ($dump, $timestep, $totaltime)= (0)x3;
 print "Dump begins!\n";
 while (my $buff=<IN>){
-	$line ++;
+	$line_in_block ++;
 
-	print OUT "$buff" if($timestep >= $bg);
+	if(1==$line_in_block){
+		$data[1]= $buff;
 
-	if($line%3==2){
-		print "\r$timestep";
-		die("\n********** Dump completed!! **********\n") if($ts_in==$ed);
+		chomp($buff);          # remove '\n'
+		$buff =~s/^(\s*)//;    # remove space at the beginning
+		$nlines= $buff;
+	}
 		
-		$timestep ++;
+	($dump, $timestep, $totaltime) = split(/\s+/, $buff) if(2==$line_in_block);
+	
+	$data[$line_in_block]= $buff if($line_in_block != 1 && $timestep>=$bg && $timestep<=$ed);
+
+	if($line_in_block==$nlines+2){
+		if($timestep>=$bg && $timestep<=$ed){
+			for(my $i=1; $i<=$nlines+2; $i ++){
+				print OUT "$data[$i]";
+			}
+		}
+
+		print "\r$timestep";
+	 
+		last if($timestep==$ed);
+		
+		$line_in_block= 0;
 	}
 }
+
+die("\n********** Dump completed!! **********\n")
