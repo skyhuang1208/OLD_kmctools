@@ -7,19 +7,21 @@
 use strict;
 $|=1;  # don't buffer output
 
-if (scalar(@ARGV) != 2) 
+if (scalar(@ARGV) != 3) 
 {
         print "ABORT:: parameters required!\a\n";
-        print "Usage: $0 [<t0.xyz>||<t0.ltcp>] <history.info>\n";
+        print "Usage: $0 [<t0.xyz>||<t0.ltcp>] <history.vcc> <history.sol>\n";
 	die;
 }
 
-my ($history_file, $history_file2) = @ARGV;
+my ($history_file, $history_file2, $history_file3) = @ARGV;
 
 if (! -e $history_file)	{ die("ABORT::history file <$history_file> doesn't exist!\n");}
 else			{ open(IN, $history_file)   || die ("Cannot open t0.xyz file for reading\n");}
 if (! -e $history_file2){ die("ABORT::history file <$history_file2> doesn't exist!\n");}
-else			{ open(IN2, $history_file2) || die ("Cannot open history.info file for reading\n");}
+else			{ open(IN2, $history_file2) || die ("Cannot open history.vcc file for reading\n");}
+if (! -e $history_file3){ die("ABORT::history file <$history_file3> doesn't exist!\n");}
+else			{ open(IN3, $history_file3) || die ("Cannot open history.sol file for reading\n");}
 
 my ($ismovie, $isltcp)= (0)x2;
 my ($min_time, $max_time, $bk_step, $ts_out);
@@ -48,9 +50,9 @@ else{
 
 my $N_atoms;
 my (@states, @x, @y, @z);
+my @vcc;
 
-my $count= -1;
-my $count_out= 0;
+my $count= 0;
 
 if($isltcp != 1){
 	open(VAC, "> vac.xyz") || die ("Cannot open vac.xyz for reading\n");
@@ -61,12 +63,12 @@ else{
 	open(LTC, "> $ts_out.ltcp") || die ("Cannot open $ts_out.ltcp for reading\n");
 }
 
-sub writedata($){
-	my ($time_)=@_;
+sub writedata($$){
+	my ($timestep_, $time_)=@_;
 	
-	print VAC "$N_vac\ntime: $time_\n";
+	print VAC "$N_vac\ntime: $timestep_ $time_\n";
 #	print A01 "$N_at1\ntime: $time_\n";
-	print A02 "$N_at2\ntime: $time_\n";
+	print A02 "$N_at2\ntime: $timestep_ $time_\n";
 	my ($check_vac, $check_at1, $check_at2)= (0)x3;
 	for(my $i=0; $i<$N_atoms; $i ++){
 		if(0==$states[$i]) {print VAC "0 $x[$i] $y[$i] $z[$i]\n"; $check_vac ++;}
@@ -82,10 +84,10 @@ sub writedata($){
 	die("at2 number inconsistent\n") if($N_at2 != $check_at2);
 }
 
-sub writeltcp($){
-	my ($time_)=@_;
+sub writeltcp($$){
+	my ($timestep_, $time_)=@_;
 	
-	print LTC "$N_atoms\nt0.ltcp\n";
+	print LTC "$N_atoms\nT: $timestep_ $time_\n";
 	for(my $i=0; $i<$N_atoms; $i ++){
 		print LTC "$states[$i] $x[$i] $y[$i] $z[$i]\n";
 		
@@ -98,13 +100,11 @@ sub output($$){
 
 	if(1==$ismovie){
 		if(($timestep_ >= $min_time) && ($timestep_ <= $max_time)){
-			$count ++;
-
 			if(0==($count%$bk_step)){
-				$count_out ++;
-				die("no more than 1000 steps can be dumped to history\n") if ($count_out>1000);
+				$count ++;
+				die("no more than 1000 steps can be dumped to history\n") if ($count>1000);
 
-				writedata($time_);
+				writedata($timestep_, $time_);
 			}
 		}
 
@@ -113,10 +113,10 @@ sub output($$){
 	else{
 		if($timestep_==$ts_out){
 			if(1==$isltcp){
-				writeltcp($time_);
+				writeltcp($timestep_, $time_);
 			}
 			else{
-				writedata($time_);
+				writedata($timestep_, $time_);
 			}
 			die("\nJob completed: only at timestep $timestep_ were written\n");
 		}
@@ -140,7 +140,11 @@ while (my $buff=<IN>){
 		$y[$line-3]= $yi;
 		$z[$line-3]= $zi;
 
-		$N_vac ++ if(0==$states[$line-3]);
+		if(0==$states[$line-3]){
+			$N_vac ++;
+			$vcc[0]= $line-3;
+			die("the code pre-assumes Nvcc=1\nedit it because Nvcc != 1\n") if($N_vac != 1);
+		}
 		$N_at1 ++ if(1==$states[$line-3]);
 		$N_at2 ++ if(-1==$states[$line-3]);
 	}
@@ -150,40 +154,77 @@ while (my $buff=<IN>){
 }
 die("vac+at1+at2 != N_atoms\n") if(($N_vac+$N_at1+$N_at2) != $N_atoms);
 print "reading t0.xyz's done\n";
-print "start reading info and output data\n";
 
-my $block=1;    # block number
+print "start reading history.vcc and output data\n";
+my ($nlines, $timestep, $time)= (0)x3;
+my $block=0;    # block number
 my $line_in_block=0;
-
-output(0, 0);
-
-my ($timestep, $time)= (0)x2;
 while (my $buff=<IN2>){
 	$line_in_block ++;
         
 	chomp($buff);          # remove '\n'
         $buff =~s/^(\s*)//;    # remove space at the beginning
 
-	if($buff=~ /dt:/){
-		die("line_in_block is $line_in_block and isnt 3, change code if it shouldnt be 3\n") if($line_in_block != 3);
-		my ($dump, $dt) = split(/\s+/, $buff);
+	if   ($line_in_block==1){ 
+		$nlines= $buff;
 		
-		$timestep ++;
-		$time += $dt;
-
-		output($timestep, $time);
-		print "\r$timestep";
-
 		$block ++;
-		$line_in_block= 0;
+	}
+	elsif($line_in_block==2){
+		(my $dump, $timestep, $time) = split(/\s+/, $buff);
 	}
 	else{
-		my ($type, $id) = split(/\s+/, $buff);
-		$states[$id]= $type;
+		my ($vltcp, $dump, $dump2, $dump3) = split(/\s+/, $buff);
+		$vcc[$block]= $vltcp;
+	}
+
+	$line_in_block= 0 if($line_in_block==$nlines+2);
+} # while()
+print("history.vcc reading completed\nNow reading history.sol and output results...\n");
+
+output(0, 0);
+
+$block=0;    # block number
+$line_in_block=0;
+my @to_stored;
+while (my $buff=<IN3>){
+	$line_in_block ++;
+        
+	chomp($buff);          # remove '\n'
+        $buff =~s/^(\s*)//;    # remove space at the beginning
+
+	if   ($line_in_block==1){ 
+		$block ++;
+		
+		$states[$vcc[$block-1]]= 1;
+		$nlines= $buff;
+		
+		print "\r$timestep";
+	}
+	elsif($line_in_block==2){
+		(my $dump, $timestep, $time) = split(/\s+/, $buff);
+		
+	}
+	else{
+		my ($from, $to) = split(/\s+/, $buff);
+		$states[$from]= 1;
+		$to_stored[$line_in_block]= $to;
+	}
+
+	if($line_in_block==$nlines+2){
+		for(my $i=3; $i<$nlines+3; $i ++){
+			$states[$to_stored[$i]]= -1;
+		}
+		$states[$vcc[$block]]= 0;
+		
+		output($timestep, $time);
+
+		$line_in_block= 0;
 	}
 } # while()
 
 
 close(IN);
 close(IN2);
-print "\noutput completed!\n";
+close(IN3);
+print "\noutput completed!\n:) happy !!! Sky Huang is stupid. Yawen is super smart. ";
