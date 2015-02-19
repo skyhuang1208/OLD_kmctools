@@ -36,9 +36,9 @@ const int v1nbr[8][3]= {{ 1,  0,  0}, { 0,  1,  0}, { 0,  0,  1},
 			{-1,  0,  0}, { 0, -1,  0}, { 0,  0, -1},
 			{ 1,  1,  1}, {-1, -1, -1}	       };
 
-const int nx= 10;
-const int ny= 10;
-const int nz= 10;
+const int nx= 64;
+const int ny= 64;
+const int nz= 64;
 // parameters //
 
 // global variables
@@ -67,15 +67,15 @@ int main(int nArg, char *Arg[]){
 	cout << "Calculation is starting..." << endl;
 	cout << "The system size is " << nx << " x " << ny << " x " << nz << endl;
 
-	// OPEN OUTPUT FILES  
-	out_csd= fopen("out_csd", "w");
-	if(NULL==out_csd) error(1, "out_csd was not open");
-	// OPEN OUTPUT FILES  
-
 	// READING FILES
-	if(nArg != 2) error(0, "nArg must be 2");
+	if(nArg != 2) error(0, "nArg must be 2\nUse csd.exe <.xyz>\n");
 	read_xyz(Arg[1]);
 	// READING FILES
+	
+	// OPEN OUTPUT FILES  
+	out_csd= fopen("out.csd", "w");
+	if(NULL==out_csd) error(1, "out_csd was not open");
+	// OPEN OUTPUT FILES  
 	
 	// CALCULATIONS
 	cal_csd();

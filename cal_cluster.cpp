@@ -25,6 +25,7 @@
 #include <fstream>
 #include <cstring>
 #include <vector>
+#include <algorithm>
 #include <sstream>
 
 using namespace std;
@@ -66,12 +67,12 @@ const int nz=  64;
 const int sample_cltr=		1e5; 
 const int cycle_out_csind=	1e7;
 
-const int sample_sro=		1e3;
-const int sample_lro=		1e3;
-const int sample_msd=		1e3;
+const int sample_sro=		1e5;
+const int sample_lro=		1e5;
+const int sample_msd=		1e5;
 
-const int sample_lce=		1e3;
-const int cycle_lce=		1e6; // MC steps that the period of the lce calculations (output an point of lce)
+const int sample_lce=		1e4;
+const int cycle_lce=		1e7; // MC steps that the period of the lce calculations (output an point of lce)
 
 const int Ttype= -1; // targeted type: solute atom
 const int itype_sro= -1;
@@ -80,7 +81,7 @@ const int jtype_sro= 1;
 
 // global variables
 double realtime= 0; // real time in the simulation (unit: s) 
-int timestep= 0;
+long long int timestep= 0;
 
 int states[nx][ny][nz];
 int* const sptr= &states[0][0][0]; // pointer to states array 
@@ -114,7 +115,7 @@ void read_his_cal(); // read his_sol and calculate
 // Calculations
 void update_cid(int x, int y, int z); // input one ltc point and renew cluster id around it
 void sum_csize();
-void write_csind(int cid, int *N_in_cltr);
+void write_csind(vector <int> N_in_cltr);
 void cal_msd(int bid);
 void cal_lce();
 void cal_sro();
@@ -127,7 +128,7 @@ int main(int nArg, char *Arg[]){
 	// INPUT FILE NAMES
 	if(nArg != 4){
 		cout << "Calculate all CLUSTERING properties" << endl;
-		cout << "Error: Parameter required: <name_in_ltcp> <name_in_history_vcc> <name_in_history_slo>" << endl;
+		cout << "Error: Parameter required: <name_in_ltcp> <name_in_history_vcc> <name_in_history_sol>" << endl;
 		exit(1);
 	}
 	strcpy(name_in_ltcp, Arg[1]);
@@ -362,24 +363,34 @@ void sum_csize(){
 	int Ncltr= 0;       // # of clusters, not atoms in clusters
 	int sumNincltr= 0;  // total number of Ttype in clusters 
 
-	int N_in_cltr[cid+1]; // for a certain cluster id, the number of counts
-	for(int i=0; i<cid+1; i ++) N_in_cltr[i]= 0;
+	vector <int> N_in_cltr;	// amount of ltcp in a cluster
+	vector <int> cid_cltr;	// the cid of a cluster corresponding to N_in_cltr
 
 	int N_check1= 0;
 	for(int i=0; i<nx*ny*nz; i ++){
 		if(id_cltr[i] != 0){
-			N_in_cltr[id_cltr[i]] ++;
+			vector<int>::iterator it= find(cid_cltr.begin(), cid_cltr.end(), id_cltr[i]);
+			if(it==cid_cltr.end()){ 
+				cid_cltr.push_back(id_cltr[i]);
+				N_in_cltr.push_back(1);
+			}
+			else
+				N_in_cltr.at(it - cid_cltr.begin()) ++;
+			
+			id_cltr[i]= it-cid_cltr.begin()+1;
+			
 			N_check1 ++;
 		}
 	}
+	cid= cid_cltr.size()+1; // +1 is unnecessary but in case
 
 	// calculated cluster related properties
-	write_csind(cid, N_in_cltr);
+	write_csind(N_in_cltr);
 	// calculated cluster related properties
 
 	int N_check2= 0;
-	for(int j=1; j<=cid; j ++){
-		if(0==N_in_cltr[j]) continue;
+	for(int j=0; j<N_in_cltr.size(); j ++){
+		if(0==N_in_cltr[j]) error(2, "(sum_csize) N_in_cltr==0");
 
 		if(N_in_cltr[j] >= DEF_CLTR){ 
 			Ncltr ++;
@@ -402,34 +413,31 @@ void sum_csize(){
 	if(0==Ncltr) Nave= 0;
 	else 	     Nave= (double) sumNincltr / Ncltr; 
 	
-	fprintf(out_csize, "%d %e %d %d %d %d %d\n", timestep, realtime, Ncsize[0], Ncsize[1], Ncsize[2], Ncsize[3], Ncsize[4]);
-	fprintf(out_csave, "%d %e %d %f\n", timestep, realtime, Ncltr, Nave);
+	fprintf(out_csize, "%lld %e %d %d %d %d %d\n", timestep, realtime, Ncsize[0], Ncsize[1], Ncsize[2], Ncsize[3], Ncsize[4]);
+	fprintf(out_csave, "%lld %e %d %f\n", timestep, realtime, Ncltr, Nave);
 }
 	
-void write_csind(int cid, int *N_in_cltr){
+void write_csind(vector <int> N_in_cltr){
 	if(cycle_out_csind%sample_cltr !=0) error(1, "cycle_out_csind must be a multiplier of sample_cltr", 2, cycle_out_csind, sample_cltr);
 	
 	if(0==timestep%cycle_out_csind){
-		vector <int> size_cltr; //the indexs list which will update cid later
-		vector <int> amount_cltr; //the amounts for the cluster sizes 
+		vector <int> size_cltr; // the size
+		vector <int> amount_cltr; //the amounts for a specific size 
 
-		for(int j=1; j<=cid; j ++){
-			if(0==N_in_cltr[j]) continue;
+		for(int j=0; j<N_in_cltr.size(); j ++){
+			if(0==N_in_cltr.at(j)) error(1, "(write_csind) N_in_cltr==0");
 		
-			for(int a=0; a<size_cltr.size(); a ++){
-				if(N_in_cltr[j]==size_cltr.at(a)){ 
-					amount_cltr.at(a);
-					goto endloop;
-				}
+			vector <int>::iterator it= find(size_cltr.begin(), size_cltr.end(), N_in_cltr.at(j));
+			if(it==size_cltr.end()){
+				size_cltr.push_back(N_in_cltr[j]);
+				amount_cltr.push_back(1);
 			}
-			
-			size_cltr.push_back(N_in_cltr[j]);
-			amount_cltr.push_back(1);
-endloop:;
+			else
+				amount_cltr.at(it - size_cltr.begin()) ++;
 		}
 
 		for(int a=0; a<size_cltr.size(); a ++){
-			fprintf(out_csind, "%d %e %d %d\n", timestep, realtime, size_cltr.at(a), amount_cltr.at(a));
+			fprintf(out_csind, "%lld %e %d %d\n", timestep, realtime, size_cltr.at(a), amount_cltr.at(a));
 		}
 	}
 }
@@ -444,7 +452,7 @@ void cal_msd(int bid){
 	double dz= (v1-v0[0])*vbra[0][2] + (v2-v0[1])*vbra[1][2] + (v3-v0[2])*vbra[2][2];
 
 	double msd= dx*dx + dy*dy + dz*dz;
-	fprintf(out_msd, "%d %e %f\n", timestep, realtime, msd);
+	fprintf(out_msd, "%lld %e %f\n", timestep, realtime, msd);
 }
 
 void cal_lce(){
@@ -514,7 +522,7 @@ void cal_sro(){
 	double zij= (double)sum_ij/sum_i;		// ij bond number for one atom
 
 	double sro= 1 - zij/n1nbr/cj;
-	fprintf(out_sro, "%d %e %f\n", timestep, realtime, sro);
+	fprintf(out_sro, "%lld %e %f\n", timestep, realtime, sro);
 }
 
 void cal_lro(){
@@ -531,5 +539,5 @@ void cal_lro(){
 	}}}
 	double lro= (double)abs(sum_lro) /nx /ny /nz;
 
-	fprintf(out_lro, "%d %e %f\n", timestep, realtime, lro);
+	fprintf(out_lro, "%lld %e %f\n", timestep, realtime, lro);
 }

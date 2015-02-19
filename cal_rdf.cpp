@@ -35,9 +35,9 @@ int nr;
 int type_A;
 int type_B;
 
-const int nx=  10;
-const int ny=  10;
-const int nz=  10;
+const int nx=  64;
+const int ny=  64;
+const int nz=  64;
 const int nall= nx*ny*nz;
 
 char name_in_t0[20];
@@ -229,9 +229,9 @@ void cal_rdf(double rho){
 
 				if(type_B==states[x2][y2][z2]) sum[a] += glist[a].at(b);
 			}
-		
-			if(0==i%1000) cout << i << "/" << Alist[0].size() << endl;
 		}
+		
+		if(0==i%1000) cout << i << "/" << Alist[0].size() << endl;
 	
 	}
 
