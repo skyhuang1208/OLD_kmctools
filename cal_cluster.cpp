@@ -113,7 +113,7 @@ void read_ltcp();
 void read_his_vcc();
 void read_his_cal(); // read his_sol and calculate
 // Calculations
-void update_cid(int x, int y, int z); // input one ltc point and renew cluster id around it
+void update_cid(int x, int y, int z, bool is_updated[]); // input one ltc point and renew cluster id around it
 void sum_csize();
 void write_csind(vector <int> N_in_cltr);
 void cal_msd(int bid);
@@ -199,6 +199,7 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 
 	// identify clusters and give them ids at t0
 	int vcheck= 0;
+	bool is_updated[nx*ny*nz]= {false};
 	for(int a=0; a<ntotal; a ++){
 		int x= (int) (a/nz)/ny;
 		int y= (int) (a/nz)%ny;
@@ -213,7 +214,7 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 			v0[0]= x; v0[1]= y; v0[2]= z; // *ONE V
 		}
 
-		update_cid(x, y, z);
+		update_cid(x, y, z, is_updated);
 	}
 	if(vcheck !=1) error(1, "(read_t0) vacancy larger than 1, need recoding");
 	iv.push_back(vector<int>()); // iv at T=0 *ONE V
@@ -289,12 +290,13 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 		// READING and UPDATE STATES ARRAY
 
 		// UPDATE CLUSTER ID
+		bool is_updated[nx*ny*nz]= {false};
 		for(int a=0; a<i_will.size(); a++){
 			int x1= (int) (i_will.at(a)/nz)/ny;
 			int y1= (int) (i_will.at(a)/nz)%ny;
 			int z1= (int)  i_will.at(a)%nz;
 
-			update_cid(x1, y1, z1);
+			update_cid(x1, y1, z1, is_updated);
 			
 			for(int b=0; b<n1nbr; b ++){
 				int x2= pbc(x1+v1nbr[b][0], nx);
@@ -302,7 +304,7 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 				int z2= pbc(z1+v1nbr[b][2], nz);
 				int index= x2*ny*nz + y2*nz + z2;
 				
-				update_cid(x2, y2, z2);
+				update_cid(x2, y2, z2, is_updated);
 			}
 		}
 		// UPDATE CLUSTER ID
@@ -314,21 +316,23 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 		if(0==timestep%sample_lro)  cal_lro();
 		if(0==timestep%sample_lce)  cal_lce();
 		// PROPERTIES CALCULATIONS
-		
+
 		if(0==timestep%100000) cout << "T: " << timestep << " " << realtime << endl;
 	}
 }
 
-void update_cid(int x, int y, int z){ 
+void update_cid(int x, int y, int z, bool is_updated[]){ 
 	int i_ltcp= x*ny*nz + y*nz + z;
-	
 	vector <int> i_ing;  //	the indexs which are being counted
+
+	if(is_updated[i_ltcp]) goto skip_update;
 
 	if(states[x][y][z]==Ttype){
 		cid ++;	
 		
 		i_ing.push_back(i_ltcp);
 		id_cltr[i_ltcp]= cid;
+		is_updated[i_ltcp]= true;
 
 		for(int a=0; a<i_ing.size(); a++){ // !! be careful here: i_ing.size() increases during the iteration and automatically changes the condition
 			int x1= (int) (i_ing.at(a)/nz)/ny;
@@ -342,20 +346,19 @@ void update_cid(int x, int y, int z){
 				int index= x2*ny*nz + y2*nz + z2;
 	
 				if(states[x2][y2][z2]==Ttype){
-					bool IsNew= true;
-					for(int c=0; c<i_ing.size(); c++)
-						if((index) == i_ing.at(c)) IsNew=false;
-
-					if(IsNew){
+					vector<int>::iterator it= find(i_ing.begin(), i_ing.end(), index);
+					if(it==i_ing.end()){
 						i_ing.push_back(index);
 						id_cltr[index]= cid;
-				
+						is_updated[i_ltcp]= true;
 					}
 				}
 			}
 		}
 	}
 	else id_cltr[i_ltcp]= 0;
+
+skip_update:;
 }
 
 void sum_csize(){
