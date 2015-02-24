@@ -86,9 +86,9 @@ long long int timestep= 0;
 int states[nx][ny][nz];
 int* const sptr= &states[0][0][0]; // pointer to states array 
 
-int v0[3]; // vposition at T=0 *ONE V
-vector < vector<int> > vltcp; // vacancy position vector 
-vector < vector<int> > iv; // vacancy image box id  *ONE V 
+int v0[3]; // vposition at T=0		*ONE V
+int vltcp; // vacancy position		*ONE V
+int iv[3]; // vacancy image box id	*ONE V 
 
 int ntt= 0; // number of targeted type 
 int cid= 0;
@@ -110,13 +110,13 @@ char name_in_sol[50];
 //######################### functions #########################//
 // Read files
 void read_ltcp();
-void read_his_vcc();
+void read_his_vcc(ifstream &in_vcc);
 void read_his_cal(); // read his_sol and calculate
 // Calculations
 void update_cid(int x, int y, int z, bool is_updated[]); // input one ltc point and renew cluster id around it
 void sum_csize();
 void write_csind(vector <int> N_in_cltr);
-void cal_msd(int bid);
+void cal_msd();
 void cal_lce();
 void cal_sro();
 void cal_lro();
@@ -166,10 +166,10 @@ int main(int nArg, char *Arg[]){
 	if(NULL==out_lro)   error(1, "out_lro   was not open");
 	// OPEN OUTPUT FILES  
 
+
 	// CALCULATIONS
 	read_ltcp();
-	read_his_vcc();
-	read_his_cal();
+	read_his_cal(); // read both history.vcc and history.sol
 	// CALCULATIONS
 
 	int tfcpu= time(0);
@@ -208,63 +208,53 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 		if(0==*(sptr+a)){
 			vcheck ++;
 
-			vltcp.push_back(vector<int>());
-			vltcp[0].push_back(a);
-			
 			v0[0]= x; v0[1]= y; v0[2]= z; // *ONE V
 		}
 
 		update_cid(x, y, z, is_updated);
 	}
 	if(vcheck !=1) error(1, "(read_t0) vacancy larger than 1, need recoding");
-	iv.push_back(vector<int>()); // iv at T=0 *ONE V
 
 	sum_csize();
 }
 
-void read_his_vcc(){ // Reading history.vcc
-	ifstream in_vcc(name_in_vcc);
-	if(! in_vcc.is_open()) error(1, "in_vcc was not open");
-	cout << name_in_vcc << " is now reading and storing..." << endl;
+void read_his_vcc(ifstream &in_vcc){ // Reading history.vcc
+	int nv; in_vcc >> nv; 
+	in_vcc.ignore();
+	if(nv != 1) error(2, "if nv > 1, modification of the code is needed");
+		
+	char c_T[3];
+	int ts_vcc;
+	double time_vcc;
+	in_vcc >> c_T >> ts_vcc >> time_vcc;
+	if(strcmp("T:", c_T) !=0) error(1, "(read vcc) the format is incorrect"); // check
+	if(ts_vcc != timestep || time_vcc != realtime) error(1, "(read vcc) the reading block might inconsistent. timestep:", 2, ts_vcc, timestep);
 
-	int nv;
-	int id_vblock= 0; // id of blocks of snapshots of vacancy history file
-	while(in_vcc >> nv){
-		in_vcc.ignore();
-		
-		id_vblock ++;
-		vltcp.push_back(vector<int>());
-		   iv.push_back(vector<int>()); // *ONE V
-		
-		string line2; getline(in_vcc, line2); // second line
-		
-		for(int a=0; a<nv; a ++){
-			int vltcp_in, ix, iy, iz;
-			in_vcc >> vltcp_in >> ix >> iy >> iz; 
+	for(int a=0; a<nv; a ++){
+		int vltcp_in, ix, iy, iz;
+		in_vcc >> vltcp_in >> ix >> iy >> iz; 
 
-			vltcp[id_vblock].push_back(vltcp_in);
-			   iv[id_vblock].push_back(ix); // *ONE V
-			   iv[id_vblock].push_back(iy); 
-			   iv[id_vblock].push_back(iz);
-		}
+		vltcp= vltcp_in; // *ONE V
+		iv[0]= ix;
+		iv[1]= iy; 
+		iv[2]= iz;
 	}
-
-	cout << name_in_vcc << " reading completed; n_vblocks= " << id_vblock+1 << ", nV= " << nv << endl;
+	
+	if(in_vcc.eof()) error(1, "(read_vcc) unexpected eof");
 }
 
 void read_his_cal(){ // Reading history.sol and calculating /////////
+	ifstream in_vcc(name_in_vcc);
+	if(! in_vcc.is_open()) error(1, "in_vcc was not open");
 	ifstream in_sol(name_in_sol);
 	if(! in_sol.is_open()) error(1, "in_sol was not open");
 	cout << name_in_sol << " is now reading to calculate csize..." << endl;
 
 	int ns;
-	int id_sblock= 0; // number of blocks of snapshots of solute history file
 	while(in_sol >> ns){
 		in_sol.ignore();
-		
-		id_sblock ++;
-		for(int a=0; a<vltcp[id_sblock-1].size(); a ++) 
-			*(sptr+vltcp[id_sblock-1].at(a))= 1; // chg prev vcc posi to 1 and then chg cur vcc posi to 0 later
+	
+		*(sptr+vltcp)= 1; // chg prev vcc posi to 1 and then chg cur vcc posi to 0 later *ONE V
 
 		vector <int> i_will; // the indexs list which will update cid later
 
@@ -284,9 +274,9 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 			i_will.push_back(s0);
 			i_will.push_back(s1);
 		}
-		
-		for(int a=0; a<ns; a ++)			*(sptr+s1_store[a])= -1;
-		for(int a=0; a<vltcp[id_sblock].size(); a ++)	*(sptr+vltcp[id_sblock].at(a))= 0;
+
+		for(int a=0; a<ns; a ++) *(sptr+s1_store[a])= -1;
+		read_his_vcc(in_vcc);    *(sptr+vltcp)= 0; // *ONE V
 		// READING and UPDATE STATES ARRAY
 
 		// UPDATE CLUSTER ID
@@ -311,12 +301,12 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 
 		// PROPERTIES CALCULATIONS
 		if(0==timestep%sample_cltr) sum_csize();
-		if(0==timestep%sample_msd)  cal_msd(id_sblock);
+		if(0==timestep%sample_msd)  cal_msd();
 		if(0==timestep%sample_sro)  cal_sro();
 		if(0==timestep%sample_lro)  cal_lro();
 		if(0==timestep%sample_lce)  cal_lce();
 		// PROPERTIES CALCULATIONS
-
+		
 		if(0==timestep%100000) cout << "T: " << timestep << " " << realtime << endl;
 	}
 }
@@ -350,7 +340,7 @@ void update_cid(int x, int y, int z, bool is_updated[]){
 					if(it==i_ing.end()){
 						i_ing.push_back(index);
 						id_cltr[index]= cid;
-						is_updated[i_ltcp]= true;
+						is_updated[index]= true;
 					}
 				}
 			}
@@ -366,34 +356,25 @@ void sum_csize(){
 	int Ncltr= 0;       // # of clusters, not atoms in clusters
 	int sumNincltr= 0;  // total number of Ttype in clusters 
 
-	vector <int> N_in_cltr;	// amount of ltcp in a cluster
-	vector <int> cid_cltr;	// the cid of a cluster corresponding to N_in_cltr
+	vector <int> N_in_cltr(cid+1); // for a certain cluster id, the number of counts
+//	for(int i=0; i<cid+1; i ++) N_in_cltr[i]= 0;
+	if(N_in_cltr[0] != 0) error(1, "initial value isn't 0");
 
 	int N_check1= 0;
 	for(int i=0; i<nx*ny*nz; i ++){
 		if(id_cltr[i] != 0){
-			vector<int>::iterator it= find(cid_cltr.begin(), cid_cltr.end(), id_cltr[i]);
-			if(it==cid_cltr.end()){ 
-				cid_cltr.push_back(id_cltr[i]);
-				N_in_cltr.push_back(1);
-			}
-			else
-				N_in_cltr.at(it - cid_cltr.begin()) ++;
-			
-			id_cltr[i]= it-cid_cltr.begin()+1;
-			
+			N_in_cltr[id_cltr[i]] ++;
 			N_check1 ++;
 		}
 	}
-	cid= cid_cltr.size()+1; // +1 is unnecessary but in case
 
 	// calculated cluster related properties
 	write_csind(N_in_cltr);
 	// calculated cluster related properties
 
 	int N_check2= 0;
-	for(int j=0; j<N_in_cltr.size(); j ++){
-		if(0==N_in_cltr[j]) error(2, "(sum_csize) N_in_cltr==0");
+	for(int j=1; j<=cid; j ++){
+		if(0==N_in_cltr[j]) continue;
 
 		if(N_in_cltr[j] >= DEF_CLTR){ 
 			Ncltr ++;
@@ -427,16 +408,16 @@ void write_csind(vector <int> N_in_cltr){
 		vector <int> size_cltr; // the size
 		vector <int> amount_cltr; //the amounts for a specific size 
 
-		for(int j=0; j<N_in_cltr.size(); j ++){
-			if(0==N_in_cltr.at(j)) error(1, "(write_csind) N_in_cltr==0");
+		for(int j=1; j<=cid; j ++){
+			if(0==N_in_cltr[j]) continue;
 		
-			vector <int>::iterator it= find(size_cltr.begin(), size_cltr.end(), N_in_cltr.at(j));
+			vector <int>::iterator it= find(size_cltr.begin(), size_cltr.end(), N_in_cltr[j]);
 			if(it==size_cltr.end()){
 				size_cltr.push_back(N_in_cltr[j]);
 				amount_cltr.push_back(1);
 			}
 			else
-				amount_cltr.at(it - size_cltr.begin()) ++;
+				amount_cltr.at(distance(size_cltr.begin(), it)) ++;
 		}
 
 		for(int a=0; a<size_cltr.size(); a ++){
@@ -445,10 +426,10 @@ void write_csind(vector <int> N_in_cltr){
 	}
 }
 
-void cal_msd(int bid){
-	int v1= (vltcp[bid][0]/nz)/ny + iv[bid][0]*nx; // *ONE V 
-	int v2= (vltcp[bid][0]/nz)%ny + iv[bid][1]*ny;
-	int v3=  vltcp[bid][0]%nz     + iv[bid][2]*nz;
+void cal_msd(){ // assume v0 is in (0 0 0) box *ONE V (entire)
+	int v1= (vltcp/nz)/ny + iv[0]*nx;
+	int v2= (vltcp/nz)%ny + iv[1]*ny;
+	int v3=  vltcp%nz     + iv[2]*nz;
 
 	double dx= (v1-v0[0])*vbra[0][0] + (v2-v0[1])*vbra[1][0] + (v3-v0[2])*vbra[2][0];
 	double dy= (v1-v0[0])*vbra[0][1] + (v2-v0[1])*vbra[1][1] + (v3-v0[2])*vbra[2][1];
