@@ -54,6 +54,7 @@ int pbc(int x_, int nx_){ // Periodic Boundary Condition
 // parameters //
 #define MAX_TYPE 2
 #define DEF_CLTR 9 // The definition of minimum number of ltcps for a cluster
+#define TS_REDC_CID 1000000000 // timesteps to reduce cid, should determine by total timesteps
 const double vbra[3][3]= {{-0.5,  0.5,  0.5}, { 0.5, -0.5,  0.5}, { 0.5,  0.5, -0.5}};
 const int n1nbr= 8;
 const int v1nbr[8][3]= {{ 1,  0,  0}, { 0,  1,  0}, { 0,  0,  1},
@@ -224,7 +225,7 @@ void read_his_vcc(ifstream &in_vcc){ // Reading history.vcc
 	if(nv != 1) error(2, "if nv > 1, modification of the code is needed");
 		
 	char c_T[3];
-	int ts_vcc;
+	long long int ts_vcc;
 	double time_vcc;
 	in_vcc >> c_T >> ts_vcc >> time_vcc;
 	if(strcmp("T:", c_T) !=0) error(1, "(read vcc) the format is incorrect"); // check
@@ -306,7 +307,23 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 		if(0==timestep%sample_lro)  cal_lro();
 		if(0==timestep%sample_lce)  cal_lce();
 		// PROPERTIES CALCULATIONS
-		
+	
+		if(0==timestep%TS_REDC_CID){
+			vector <int> cid_cltr;
+			for(int i=0; i<nx*ny*nz; i ++){
+				if(id_cltr[i] != 0){
+					vector<int>::iterator it= find(cid_cltr.begin(), cid_cltr.end(), id_cltr[i]);
+					if(it==cid_cltr.end()){
+						cid_cltr.push_back(id_cltr[i]);
+						id_cltr[i]= cid_cltr.size();
+					}
+					else
+						id_cltr[i]= distance(cid_cltr.begin(), it)+1;
+				}
+			}
+			cid= cid_cltr.size();
+		}
+
 		if(0==timestep%100000) cout << "T: " << timestep << " " << realtime << endl;
 	}
 }
@@ -357,8 +374,6 @@ void sum_csize(){
 	int sumNincltr= 0;  // total number of Ttype in clusters 
 
 	vector <int> N_in_cltr(cid+1); // for a certain cluster id, the number of counts
-//	for(int i=0; i<cid+1; i ++) N_in_cltr[i]= 0;
-	if(N_in_cltr[0] != 0) error(1, "initial value isn't 0");
 
 	int N_check1= 0;
 	for(int i=0; i<nx*ny*nz; i ++){
