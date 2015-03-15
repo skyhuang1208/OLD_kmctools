@@ -142,8 +142,7 @@ while (my $buff=<IN>){
 
 		if(0==$states[$line-3]){
 			$N_vac ++;
-			$vcc[0]= $line-3;
-			die("the code pre-assumes Nvcc=1\nedit it because Nvcc != 1\n") if($N_vac != 1);
+			$vcc[$N_vac-1]= $line-3;
 		}
 		$N_at1 ++ if(1==$states[$line-3]);
 		$N_at2 ++ if(-1==$states[$line-3]);
@@ -154,38 +153,45 @@ while (my $buff=<IN>){
 }
 die("vac+at1+at2 != N_atoms\n") if(($N_vac+$N_at1+$N_at2) != $N_atoms);
 print "reading t0.xyz's done\n";
+print "WARNING!! More than 1 vcc in the system!! \n" if ($N_vac != 1);
+
 
 print "start reading history.vcc and output data\n";
-my ($nlines, $timestep, $time)= (0)x3;
-my $block=0;    # block number
-my $line_in_block=0;
-while (my $buff=<IN2>){
-	$line_in_block ++;
-        
-	chomp($buff);          # remove '\n'
-        $buff =~s/^(\s*)//;    # remove space at the beginning
 
-	if   ($line_in_block==1){ 
-		$nlines= $buff;
-		
-		$block ++;
-	}
-	elsif($line_in_block==2){
-		(my $dump, $timestep, $time) = split(/\s+/, $buff);
-	}
-	else{
-		my ($vltcp, $dump, $dump2, $dump3) = split(/\s+/, $buff);
-		$vcc[$block]= $vltcp;
-	}
+sub read_vcc(){
+	my ($nlines, $timestep, $time)= (0)x3;
+	my $line_in_block=0;
+	
+	do{
+		$line_in_block ++;
+		die("unexpected eof in reading vcc\n") if(eof);
+       
+		my $buff= <IN2>;
+		chomp($buff);          # remove '\n'
+		$buff =~s/^(\s*)//;    # remove space at the beginning
 
-	$line_in_block= 0 if($line_in_block==$nlines+2);
-} # while()
+		if   ($line_in_block==1){ 
+			$nlines= $buff;
+			die("Nvcc in t0 file is inconsistent with in history.vcc file\n") if($nlines != $N_vac);
+		}
+		elsif($line_in_block==2){
+			(my $dump, $timestep, $time) = split(/\s+/, $buff);
+		}
+		else{
+			my ($vltcp, $dump, $dump2, $dump3) = split(/\s+/, $buff);
+			$vcc[$line_in_block-3]= $vltcp;
+		}
+
+	}while($line_in_block!=$nlines+2);
+} # read_vcc
 print("history.vcc reading completed\nNow reading history.sol and output results...\n");
 
 output(0, 0);
 
-$block=0;    # block number
-$line_in_block=0;
+my $block=0;    # block number
+my $nlines=0;
+my $line_in_block=0;
+my ($timestep, $time);
 my @to_stored;
 while (my $buff=<IN3>){
 	$line_in_block ++;
@@ -196,14 +202,12 @@ while (my $buff=<IN3>){
 	if   ($line_in_block==1){ 
 		$block ++;
 		
-		$states[$vcc[$block-1]]= 1;
+		foreach my $i (@vcc) {$states[$i]= 1;}
 		$nlines= $buff;
-		
-		print "\r$timestep";
 	}
 	elsif($line_in_block==2){
 		(my $dump, $timestep, $time) = split(/\s+/, $buff);
-		
+		print "\r$timestep";
 	}
 	else{
 		my ($from, $to) = split(/\s+/, $buff);
@@ -215,7 +219,9 @@ while (my $buff=<IN3>){
 		for(my $i=3; $i<$nlines+3; $i ++){
 			$states[$to_stored[$i]]= -1;
 		}
-		$states[$vcc[$block]]= 0;
+		
+		read_vcc();
+		foreach my $i (@vcc) {$states[$i]= 0;}
 		
 		output($timestep, $time);
 

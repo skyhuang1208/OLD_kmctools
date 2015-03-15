@@ -87,9 +87,9 @@ long long int timestep= 0;
 int states[nx][ny][nz];
 int* const sptr= &states[0][0][0]; // pointer to states array 
 
-int v0[3]; // vposition at T=0		*ONE V
-int vltcp; // vacancy position		*ONE V
-int iv[3]; // vacancy image box id	*ONE V 
+int v0[3]; // vposition at T=0	
+vector <int> vltcp; // vacancy position	
+int iv[3]; // vacancy image box id	 
 
 int ntt= 0; // number of targeted type 
 int cid= 0;
@@ -209,12 +209,12 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 		if(0==*(sptr+a)){
 			vcheck ++;
 
-			v0[0]= x; v0[1]= y; v0[2]= z; // *ONE V
+			v0[0]= x; v0[1]= y; v0[2]= z; 
 		}
 
 		update_cid(x, y, z, is_updated);
 	}
-	if(vcheck !=1) error(1, "(read_t0) vacancy larger than 1, need recoding");
+	if(vcheck !=1) error(1, "(read_t0) WARNING!!! NV != 1, msd is not correct !!!");
 
 	sum_csize();
 }
@@ -231,11 +231,12 @@ void read_his_vcc(ifstream &in_vcc){ // Reading history.vcc
 	if(strcmp("T:", c_T) !=0) error(1, "(read vcc) the format is incorrect"); // check
 	if(ts_vcc != timestep || time_vcc != realtime) error(1, "(read vcc) the reading block might inconsistent. timestep:", 2, ts_vcc, timestep);
 
+	vltcp.clear();
 	for(int a=0; a<nv; a ++){
 		int vltcp_in, ix, iy, iz;
 		in_vcc >> vltcp_in >> ix >> iy >> iz; 
 
-		vltcp= vltcp_in; // *ONE V
+		vltcp.push_back(vltcp_in); 
 		iv[0]= ix;
 		iv[1]= iy; 
 		iv[2]= iz;
@@ -255,7 +256,7 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 	while(in_sol >> ns){
 		in_sol.ignore();
 	
-		*(sptr+vltcp)= 1; // chg prev vcc posi to 1 and then chg cur vcc posi to 0 later *ONE V
+		for(int a=0; a<vltcp.size(); a ++) *(sptr+vltcp[a])= 1; // chg prev vcc posi to 1 and then chg cur vcc posi to 0 later
 
 		vector <int> i_will; // the indexs list which will update cid later
 
@@ -277,7 +278,8 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 		}
 
 		for(int a=0; a<ns; a ++) *(sptr+s1_store[a])= -1;
-		read_his_vcc(in_vcc);    *(sptr+vltcp)= 0; // *ONE V
+		read_his_vcc(in_vcc);    
+		for(int a=0; a<vltcp.size(); a ++) *(sptr+vltcp[a])= 0;
 		// READING and UPDATE STATES ARRAY
 
 		// UPDATE CLUSTER ID
@@ -442,9 +444,9 @@ void write_csind(vector <int> N_in_cltr){
 }
 
 void cal_msd(){ // assume v0 is in (0 0 0) box *ONE V (entire)
-	int v1= (vltcp/nz)/ny + iv[0]*nx;
-	int v2= (vltcp/nz)%ny + iv[1]*ny;
-	int v3=  vltcp%nz     + iv[2]*nz;
+	int v1= (vltcp[0]/nz)/ny + iv[0]*nx;
+	int v2= (vltcp[0]/nz)%ny + iv[1]*ny;
+	int v3=  vltcp[0]%nz     + iv[2]*nz;
 
 	double dx= (v1-v0[0])*vbra[0][0] + (v2-v0[1])*vbra[1][0] + (v3-v0[2])*vbra[2][0];
 	double dy= (v1-v0[0])*vbra[0][1] + (v2-v0[1])*vbra[1][1] + (v3-v0[2])*vbra[2][1];
