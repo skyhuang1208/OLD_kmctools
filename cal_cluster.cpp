@@ -61,9 +61,9 @@ const int v1nbr[8][3]= {{ 1,  0,  0}, { 0,  1,  0}, { 0,  0,  1},
 			{-1,  0,  0}, { 0, -1,  0}, { 0,  0, -1},
 			{ 1,  1,  1}, {-1, -1, -1}	       };
 
-const int nx=  64;
-const int ny=  64;
-const int nz=  64;
+const int nx= 100;
+const int ny= 100;
+const int nz= 100;
 
 const int sample_cltr=		1e5; 
 const int cycle_out_csind=	1e7;
@@ -72,11 +72,11 @@ const int sample_sro=		1e5;
 const int sample_lro=		1e5;
 const int sample_msd=		1e5;
 
-const int sample_lce=		1e4;
+const int sample_lce=		1e5;
 const int cycle_lce=		1e7; // MC steps that the period of the lce calculations (output an point of lce)
 
-const int Ttype= -1; // targeted type: solute atom
-const int itype_sro= -1;
+const int Ttype= 0; // targeted type: solute atom
+const int itype_sro= 0;
 const int jtype_sro= 1;
 // parameters //
 
@@ -210,11 +210,12 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 			vcheck ++;
 
 			v0[0]= x; v0[1]= y; v0[2]= z; 
+			vltcp.push_back(a);
 		}
 
 		update_cid(x, y, z, is_updated);
 	}
-	if(vcheck !=1) error(1, "(read_t0) WARNING!!! NV != 1, msd is not correct !!!");
+	if(vcheck !=1) cout << "WARNING!!! NV != 1, msd is not calculated correctly !!!" << endl;
 
 	sum_csize();
 }
@@ -222,13 +223,15 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 void read_his_vcc(ifstream &in_vcc){ // Reading history.vcc
 	int nv; in_vcc >> nv; 
 	in_vcc.ignore();
-	if(nv != 1) error(2, "if nv > 1, modification of the code is needed");
 		
 	char c_T[3];
 	long long int ts_vcc;
 	double time_vcc;
 	in_vcc >> c_T >> ts_vcc >> time_vcc;
-	if(strcmp("T:", c_T) !=0) error(1, "(read vcc) the format is incorrect"); // check
+	if(strcmp("T:", c_T) !=0){ 
+		cout << c_T << endl;
+		error(1, "(read vcc) the format is incorrect"); // check
+	}
 	if(ts_vcc != timestep || time_vcc != realtime) error(1, "(read vcc) the reading block might inconsistent. timestep:", 2, ts_vcc, timestep);
 
 	vltcp.clear();
@@ -255,10 +258,12 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 	int ns;
 	while(in_sol >> ns){
 		in_sol.ignore();
-	
-		for(int a=0; a<vltcp.size(); a ++) *(sptr+vltcp[a])= 1; // chg prev vcc posi to 1 and then chg cur vcc posi to 0 later
-
 		vector <int> i_will; // the indexs list which will update cid later
+
+		for(int a=0; a<vltcp.size(); a ++){ // chg prev vcc posi to 1 and then chg cur vcc posi to 0 later
+			*(sptr+vltcp[a])= 1;
+			i_will.push_back(vltcp[a]);
+		}
 
 		// READING and UPDATE STATES ARRAY
 		char c_T[3];
@@ -279,7 +284,10 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 
 		for(int a=0; a<ns; a ++) *(sptr+s1_store[a])= -1;
 		read_his_vcc(in_vcc);    
-		for(int a=0; a<vltcp.size(); a ++) *(sptr+vltcp[a])= 0;
+		for(int a=0; a<vltcp.size(); a ++){
+			*(sptr+vltcp[a])= 0;
+			i_will.push_back(vltcp[a]);
+		}
 		// READING and UPDATE STATES ARRAY
 
 		// UPDATE CLUSTER ID

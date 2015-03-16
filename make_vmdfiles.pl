@@ -53,6 +53,7 @@ my (@states, @x, @y, @z);
 my @vcc;
 
 my $count= 0;
+my $bk_count= -1;
 
 if($isltcp != 1){
 	open(VAC, "> vac.xyz") || die ("Cannot open vac.xyz for reading\n");
@@ -100,7 +101,9 @@ sub output($$){
 
 	if(1==$ismovie){
 		if(($timestep_ >= $min_time) && ($timestep_ <= $max_time)){
-			if(0==($count%$bk_step)){
+			$bk_count ++;
+
+			if(0==($bk_count%$bk_step)){
 				$count ++;
 				die("no more than 1000 steps can be dumped to history\n") if ($count>1000);
 
@@ -164,7 +167,6 @@ sub read_vcc(){
 	
 	do{
 		$line_in_block ++;
-		die("unexpected eof in reading vcc\n") if(eof);
        
 		my $buff= <IN2>;
 		chomp($buff);          # remove '\n'
@@ -173,6 +175,7 @@ sub read_vcc(){
 		if   ($line_in_block==1){ 
 			$nlines= $buff;
 			die("Nvcc in t0 file is inconsistent with in history.vcc file\n") if($nlines != $N_vac);
+			die("unexpected eof in reading vcc\n") if(eof);
 		}
 		elsif($line_in_block==2){
 			(my $dump, $timestep, $time) = split(/\s+/, $buff);
