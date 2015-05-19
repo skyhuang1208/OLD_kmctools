@@ -25,6 +25,7 @@
 #include <fstream>
 #include <cstring>
 #include <vector>
+#include <array>
 #include <algorithm>
 #include <sstream>
 
@@ -54,7 +55,6 @@ int pbc(int x_, int nx_){ // Periodic Boundary Condition
 // parameters //
 #define MAX_TYPE 2
 #define DEF_CLTR 9 // The definition of minimum number of ltcps for a cluster
-#define TS_REDC_CID 1000000000 // timesteps to reduce cid, should determine by total timesteps
 const double vbra[3][3]= {{-0.5,  0.5,  0.5}, { 0.5, -0.5,  0.5}, { 0.5,  0.5, -0.5}};
 const int n1nbr= 8;
 const int v1nbr[8][3]= {{ 1,  0,  0}, { 0,  1,  0}, { 0,  0,  1},
@@ -84,8 +84,7 @@ const int jtype_sro= 1;
 double realtime= 0; // real time in the simulation (unit: s) 
 long long int timestep= 0;
 
-int states[nx][ny][nz];
-int* const sptr= &states[0][0][0]; // pointer to states array 
+array <int, nx*ny*nz> states; // states[nx][ny][nz];
 
 int v0[3]; // vposition at T=0	
 vector <int> vltcp; // vacancy position	
@@ -93,7 +92,7 @@ int iv[3]; // vacancy image box id
 
 int ntt= 0; // number of targeted type 
 int cid= 0;
-int id_cltr[nx*ny*nz]= {0}; // indicate the cluster id that a Ttype ltc(index) is labeled with (0 means not Ttype)
+array <int, nx*ny*nz> id_cltr= {0}; // indicate the cluster id that a Ttype ltc(index) is labeled with (0 means not Ttype)
 
 FILE * out_csize; // in sum_csize
 FILE * out_csave; // in sum_csize
@@ -111,7 +110,7 @@ char name_in_sol[50];
 //######################### functions #########################//
 // Read files
 void read_ltcp();
-void read_his_vcc(ifstream &in_vcc);
+void read_his_vcc(ifstream &in_vcc, vector <int> & i_will);
 void read_his_cal(); // read his_sol and calculate
 // Calculations
 void update_cid(int x, int y, int z, bool is_updated[]); // input one ltc point and renew cluster id around it
@@ -189,9 +188,12 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 	for(int a=0; a<ntotal; a ++){
 		int state_in, i, j, k;
 		in_ltcp >> state_in >> i >> j >> k;
+		if(state_in != 1 && state_in != -1) in_ltcp >> ix >> iy >> iz; 
+		
 		if(in_ltcp.eof()) error(1, "reach end of file before finish reading all data");
 		if(state_in > MAX_TYPE) error(1, "(in_t0) state input is larger than MAX_TYPE", 1, state_in); // check
-		states[i][j][k]= state_in;
+		if(a != i*ny*nz+j*nz+k) error(1, "in_t0: ltcp inconsistent", 2, a, i*ny*nz+j*nz+k); // check
+		states[a]= state_in;
 
 		if(state_in==Ttype) ntt ++;
 	}
@@ -206,7 +208,7 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 		int y= (int) (a/nz)%ny;
 		int z= (int)  a%nz;
 
-		if(0==*(sptr+a)){
+		if(0==states[a]){
 			vcheck ++;
 
 			v0[0]= x; v0[1]= y; v0[2]= z; 
@@ -220,7 +222,7 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 	sum_csize();
 }
 
-void read_his_vcc(ifstream &in_vcc){ // Reading history.vcc
+void read_his_vcc(ifstream &in_vcc, vector <int> & i_will){ // Reading history.vcc
 	int nv; in_vcc >> nv; 
 	in_vcc.ignore();
 		
@@ -236,13 +238,16 @@ void read_his_vcc(ifstream &in_vcc){ // Reading history.vcc
 
 	vltcp.clear();
 	for(int a=0; a<nv; a ++){
-		int vltcp_in, ix, iy, iz;
-		in_vcc >> vltcp_in >> ix >> iy >> iz; 
+		int type_in, vltcp_in, ix, iy, iz;
+		in_vcc >> type_in >> vltcp_in >> ix >> iy >> iz; 
 
+		states[vltcp_in]= type_in;
 		vltcp.push_back(vltcp_in); 
 		iv[0]= ix;
 		iv[1]= iy; 
 		iv[2]= iz;
+
+		i_will.push_back(vltcp_in);
 	}
 	
 	if(in_vcc.eof()) error(1, "(read_vcc) unexpected eof");
@@ -260,79 +265,54 @@ void read_his_cal(){ // Reading history.sol and calculating /////////
 		in_sol.ignore();
 		vector <int> i_will; // the indexs list which will update cid later
 
-		for(int a=0; a<vltcp.size(); a ++){ // chg prev vcc posi to 1 and then chg cur vcc posi to 0 later
-			*(sptr+vltcp[a])= 1;
-			i_will.push_back(vltcp[a]);
-		}
-
 		// READING and UPDATE STATES ARRAY
 		char c_T[3];
 		in_sol >> c_T >> timestep >> realtime;
 		if(strcmp("T:", c_T) !=0) error(1, "(reading history) the format is incorrect"); // check
-		
-		vector <int> s1_store;
+	
+		states.fill(1);
 		for(int a=0; a< ns; a ++){
-			int s0, s1; // from and to ltcp of solute atoms
-			in_sol >> s0 >> s1;
-			if(*(sptr+s0) != -1) error(1, "(his_sol) the <from> state of a ltcp is not solute", 2, s0, *(sptr+s0)); // check
+			int sltcp; // from and to ltcp of solute atoms
+			in_sol >> sltcp;
 
-			*(sptr+s0)= 1;
-			s1_store.push_back(s1); // update <to> states later or a second <to> ltcp to a prev <from> ltcp may get wrong
-			i_will.push_back(s0);
-			i_will.push_back(s1);
+			states[sltcp]= -1;
+			i_will.push_back(sltcp);
 		}
 
-		for(int a=0; a<ns; a ++) *(sptr+s1_store[a])= -1;
-		read_his_vcc(in_vcc);    
-		for(int a=0; a<vltcp.size(); a ++){
-			*(sptr+vltcp[a])= 0;
-			i_will.push_back(vltcp[a]);
-		}
+		read_his_vcc(in_vcc, i_will);
 		// READING and UPDATE STATES ARRAY
 
 		// UPDATE CLUSTER ID
-		bool is_updated[nx*ny*nz]= {false};
-		for(int a=0; a<i_will.size(); a++){
-			int x1= (int) (i_will.at(a)/nz)/ny;
-			int y1= (int) (i_will.at(a)/nz)%ny;
-			int z1= (int)  i_will.at(a)%nz;
-
-			update_cid(x1, y1, z1, is_updated);
-			
-			for(int b=0; b<n1nbr; b ++){
-				int x2= pbc(x1+v1nbr[b][0], nx);
-				int y2= pbc(y1+v1nbr[b][1], ny);
-				int z2= pbc(z1+v1nbr[b][2], nz);
-				int index= x2*ny*nz + y2*nz + z2;
+		if(0==timestep%sample_cltr){
+			id_cltr.fill(0); cid= 0;
+			bool is_updated[nx*ny*nz]= {false};
+			for(int a=0; a<i_will.size(); a++){
+				int x1= (int) (i_will.at(a)/nz)/ny;
+				int y1= (int) (i_will.at(a)/nz)%ny;
+				int z1= (int)  i_will.at(a)%nz;
+	
+				update_cid(x1, y1, z1, is_updated);
 				
-				update_cid(x2, y2, z2, is_updated);
+				for(int b=0; b<n1nbr; b ++){
+					int x2= pbc(x1+v1nbr[b][0], nx);
+					int y2= pbc(y1+v1nbr[b][1], ny);
+					int z2= pbc(z1+v1nbr[b][2], nz);
+					int index= x2*ny*nz + y2*nz + z2;
+					
+					update_cid(x2, y2, z2, is_updated);
+				}
 			}
+			
+			sum_csize();
 		}
 		// UPDATE CLUSTER ID
 
 		// PROPERTIES CALCULATIONS
-		if(0==timestep%sample_cltr) sum_csize();
 		if(0==timestep%sample_msd)  cal_msd();
 		if(0==timestep%sample_sro)  cal_sro();
 		if(0==timestep%sample_lro)  cal_lro();
 		if(0==timestep%sample_lce)  cal_lce();
 		// PROPERTIES CALCULATIONS
-	
-		if(0==timestep%TS_REDC_CID){
-			vector <int> cid_cltr;
-			for(int i=0; i<nx*ny*nz; i ++){
-				if(id_cltr[i] != 0){
-					vector<int>::iterator it= find(cid_cltr.begin(), cid_cltr.end(), id_cltr[i]);
-					if(it==cid_cltr.end()){
-						cid_cltr.push_back(id_cltr[i]);
-						id_cltr[i]= cid_cltr.size();
-					}
-					else
-						id_cltr[i]= distance(cid_cltr.begin(), it)+1;
-				}
-			}
-			cid= cid_cltr.size();
-		}
 
 		if(0==timestep%100000) cout << "T: " << timestep << " " << realtime << endl;
 	}
@@ -344,7 +324,7 @@ void update_cid(int x, int y, int z, bool is_updated[]){
 
 	if(is_updated[i_ltcp]) goto skip_update;
 
-	if(states[x][y][z]==Ttype){
+	if(states[i_ltcp]==Ttype){
 		cid ++;	
 		
 		i_ing.push_back(i_ltcp);
@@ -362,7 +342,7 @@ void update_cid(int x, int y, int z, bool is_updated[]){
 				int z2= pbc(z1+v1nbr[b][2], nz);
 				int index= x2*ny*nz + y2*nz + z2;
 	
-				if(states[x2][y2][z2]==Ttype){
+				if(states[index]==Ttype){
 					vector<int>::iterator it= find(i_ing.begin(), i_ing.end(), index);
 					if(it==i_ing.end()){
 						i_ing.push_back(index);
@@ -476,15 +456,17 @@ void cal_lce(){
 	for(int i= 0; i<nx; i++){
 		for(int j= 0; j<ny; j++){
 			for(int k= 0; k<nz; k++){
-				if(0==states[i][j][k]){
+				int ltcp= i*ny*nz + j*nz + k;
+				if(0==states[ltcp]){
 					count_vcc ++;
 
 					for(int b=0; b<n1nbr; b ++){
 						int x2= pbc(i+v1nbr[b][0], nx);
 						int y2= pbc(j+v1nbr[b][1], ny);
 						int z2= pbc(k+v1nbr[b][2], nz);
-					
-						if(Ttype==states[x2][y2][z2]) ttsum ++;
+						int index= x2*ny*nz+y2*nz+z2;
+
+						if(Ttype==states[index]) ttsum ++;
 					}
 				}
 	}}}
@@ -511,19 +493,22 @@ void cal_sro(){
 
 	for(int i=0; i<nx; i++){ 
 		for(int j=0; j<ny; j++){ 
-			for(int k=0; k<nz; k++){ 
-				if(jtype_sro == states[i][j][k]) 
+			for(int k=0; k<nz; k++){
+				int ltcp= i*ny*nz+j*nz+k;
+
+				if(jtype_sro == states[ltcp]) 
 					sum_j ++;
 			
-				if(itype_sro == states[i][j][k]){
+				if(itype_sro == states[ltcp]){
 					sum_i ++;
 
 					for(int b=0; b<n1nbr; b ++){
 						int x2= pbc(i+v1nbr[b][0], nx);
 						int y2= pbc(j+v1nbr[b][1], ny);
 						int z2= pbc(k+v1nbr[b][2], nz);
-		
-						if(states[x2][y2][z2]== jtype_sro) sum_ij ++;
+						int index= x2*ny*nz+y2*nz+z2;
+
+						if(states[index]== jtype_sro) sum_ij ++;
 					}	
 				}
 	}}}
@@ -539,12 +524,14 @@ void cal_lro(){
 
 	for(int i=0; i<nx; i++){ 
 		for(int j=0; j<ny; j++){ 
-			for(int k=0; k<nz; k++){ 
+			for(int k=0; k<nz; k++){
+				int ltcp= i*ny*nz + j*nz + k;
+
 				int sign_ltc;
 				if(0==((i+j+k)%2)) sign_ltc=  1;
 				else		   sign_ltc= -1;
 
-				sum_lro += sign_ltc * states[i][j][k];
+				sum_lro += sign_ltc * states[ltcp];
 	}}}
 	double lro= (double)abs(sum_lro) /nx /ny /nz;
 
