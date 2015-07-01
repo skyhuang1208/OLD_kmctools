@@ -75,8 +75,8 @@ const int sample_msd=		1e5;
 const int sample_lce=		1e5;
 const int cycle_lce=		1e7; // MC steps that the period of the lce calculations (output an point of lce)
 
-const int Ttype= 0; // targeted type: solute atom
-const int itype_sro= 0;
+const int Ttype= -1; // targeted type: solute atom
+const int itype_sro= -1;
 const int jtype_sro= 1;
 // parameters //
 
@@ -186,7 +186,7 @@ void read_ltcp(){ // Reading t0.ltcp ////////////////////
 	string line2; getline(in_ltcp, line2);
 
 	for(int a=0; a<ntotal; a ++){
-		int state_in, i, j, k;
+		int state_in, i, j, k, ix, iy, iz;
 		in_ltcp >> state_in >> i >> j >> k;
 		if(state_in != 1 && state_in != -1) in_ltcp >> ix >> iy >> iz; 
 		
@@ -362,6 +362,9 @@ void sum_csize(){
 	int Ncsize[5]= {0}; // # of clusters for single, l>1, l>5, l>10, l>30
 	int Ncltr= 0;       // # of clusters, not atoms in clusters
 	int sumNincltr= 0;  // total number of Ttype in clusters 
+	double sumRadius= 0;// sum of radius of clusters
+#define N_UCELL 2.0
+#define PI 3.14159265359
 
 	vector <int> N_in_cltr(cid+1); // for a certain cluster id, the number of counts
 
@@ -384,6 +387,7 @@ void sum_csize(){
 		if(N_in_cltr[j] >= DEF_CLTR){ 
 			Ncltr ++;
 			sumNincltr += N_in_cltr[j];
+			sumRadius  += pow((N_in_cltr[j]/N_UCELL)*(3.0/4.0/PI), (1.0/3.0));
 		}
 		
 		N_check2 += N_in_cltr[j];
@@ -398,12 +402,14 @@ void sum_csize(){
 	if(N_check1 != ntt) error(2, "number inconsistent for check1", 2, N_check1, ntt);
 	if(N_check2 != ntt) error(2, "number inconsistent for check2", 2, N_check2, ntt);
 
-	double Nave;
-	if(0==Ncltr) Nave= 0;
-	else 	     Nave= (double) sumNincltr / Ncltr; 
+	double Nave, Rave; // average number of atoms and radius of clusters
+	if(0==Ncltr){ Nave= 0; Rave= 0; }
+	else{ 	      Nave= (double) sumNincltr / Ncltr;
+		      Rave= sumRadius / Ncltr;
+	}
 	
 	fprintf(out_csize, "%lld %e %d %d %d %d %d\n", timestep, realtime, Ncsize[0], Ncsize[1], Ncsize[2], Ncsize[3], Ncsize[4]);
-	fprintf(out_csave, "%lld %e %d %f\n", timestep, realtime, Ncltr, Nave);
+	fprintf(out_csave, "%lld %e %d %f %f\n", timestep, realtime, Ncltr, Nave, Rave);
 }
 	
 void write_csind(vector <int> N_in_cltr){

@@ -100,7 +100,15 @@ sub writeltcp($$){
 	
 	print LTC "$N_atoms\nT: $timestep_ $time_\n";
 	for(my $i=0; $i<$N_atoms; $i ++){
-		print LTC "$states[$i] $x[$i] $y[$i] $z[$i]\n";
+		if(3==$states[$i] || 2==$states[$i] || -2==$states[$i]){
+			print LTC "$states[$i] $x[$i] $y[$i] $z[$i] 0 0 0 0 0\n";
+		}
+		elsif(0==$states[$i]){
+			print LTC "$states[$i] $x[$i] $y[$i] $z[$i] 0 0 0\n";
+		}
+		else{
+			print LTC "$states[$i] $x[$i] $y[$i] $z[$i]\n";
+		}
 	}
 }
 
